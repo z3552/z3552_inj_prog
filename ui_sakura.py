@@ -17,6 +17,21 @@ FFMPEG_PATH = os.path.join(os.path.dirname(__file__), "ffmpeg", "bin", "ffmpeg.e
 def generate_random_filename(length=10):
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
+# 🧠 Логгер для отображения сообщений yt_dlp в логах GUI
+class YTDLogger:
+    def __init__(self, log_func):
+        self.log_func = log_func
+
+    def debug(self, msg):
+        if msg.strip():
+            self.log_func(msg)
+
+    def warning(self, msg):
+        self.log_func(f"⚠️ {msg}")
+
+    def error(self, msg):
+        self.log_func(f"❌ {msg}")
+
 class SakuraDownloader:
     def __init__(self, root):
         self.root = root
@@ -35,7 +50,7 @@ class SakuraDownloader:
         self.build_ui()
 
     def build_ui(self):
-        self.root.configure(bg="#ffe6f0")  # Розовый фон
+        self.root.configure(bg="#ffe6f0")
 
         frame = Frame(self.root, bg="#fff0f5", padx=15, pady=15, bd=3, relief="ridge")
         frame.pack(padx=10, pady=10)
@@ -169,7 +184,8 @@ class SakuraDownloader:
                     "format": format_id if mode != "Видео + Аудио" else "bestvideo+bestaudio",
                     "outtmpl": os.path.join(path, "%(title)s.%(ext)s"),
                     "ffmpeg_location": FFMPEG_PATH,
-                    "postprocessors": []
+                    "postprocessors": [],
+                    "logger": YTDLogger(self.log)  # 🔥 Главное добавление
                 }
                 if mode == "Аудио":
                     ydl_opts["postprocessors"].append({
