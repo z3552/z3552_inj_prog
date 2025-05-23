@@ -1,7 +1,7 @@
 # 📦 Импорт нужных классов и функций из tkinter (графический интерфейс)
 from tkinter import (
     Label, Entry, Button, StringVar, OptionMenu, filedialog,
-    Text, Frame, Toplevel, Canvas, Scrollbar
+    Text, Frame, Toplevel, Canvas, Scrollbar, Listbox, SINGLE, END
 )
 
 # 📦 Импорт сторонних и стандартных библиотек
@@ -13,6 +13,7 @@ from PIL import Image, ImageTk
 from io import BytesIO
 import yt_dlp
 import threading
+import subprocess
 
 # ДО класса SakuraDownloader:
 ffmpeg_dir = r"D:\github\z3552_inj_prog\ffmpeg\bin"
@@ -170,17 +171,15 @@ class SakuraDownloader:
 
                 # Форматы: показывать ВСЁ, что есть (и с аудио, и без)
                 formats = info.get("formats", [])
-                format_choices = ["Лучшее качество (со звуком)"]
-                format_map = {"Лучшее качество (со звуком)": "bestvideo+bestaudio/best"}
+                format_choices = []
+                format_map = {}
                 for f in formats:
-                    ext = f.get('ext', '')
                     note = f.get('format_note', '')
-                    height = f.get('height')
-                    fps = f.get('fps')
+                    ext = f.get('ext', '')
                     acodec = f.get('acodec')
                     vcodec = f.get('vcodec')
-                    abr = f.get('abr')
-                    vbr = f.get('vbr')
+                    height = f.get('height')
+                    fps = f.get('fps')
                     label = f"{ext}"
                     if note:
                         label += f" {note}"
@@ -192,17 +191,57 @@ class SakuraDownloader:
                         label += f" {vcodec}"
                     if acodec and acodec != 'none':
                         label += f" audio"
-                    if vbr:
-                        label += f" {vbr}kbps"
-                    if abr:
-                        label += f" audio:{abr}kbps"
-                    if acodec == 'none':
-                        label += " (без звука)"
                     format_choices.append(label)
                     format_map[label] = f["format_id"]
 
+                dubbed_audio_tracks = []
+                for f in formats:
+                    note = f.get('format_note', '')
+                    ext = f.get('ext', '')
+                    acodec = f.get('acodec')
+                    vcodec = f.get('vcodec')
+                    lang = f.get("language") or ""
+                    # Оригинальные видео (не дубляж)
+                    if not ("dubbed" in note.lower() or "дубляж" in note.lower()):
+                        # Только с видео и аудио
+                        if vcodec != 'none' and acodec != 'none':
+                            label = f"{ext}"
+                            if note:
+                                label += f" {note}"
+                            if height:
+                                label += f" {height}p"
+                            if fps:
+                                label += f" {fps}fps"
+                            if vcodec and vcodec != 'none':
+                                label += f" {vcodec}"
+                            if acodec and acodec != 'none':
+                                label += f" audio"
+                            if acodec == 'none':
+                                label += " (без звука)"
+                            format_choices.append(label)
+                            format_map[label] = f["format_id"]
+                    else:
+                        # Сохраняем дубляжные аудиодорожки
+                        dubbed_audio_tracks.append({
+                            "lang": lang,
+                            "label": f"{LANG_NATIVE.get(lang, lang)} (dubbed)",
+                            "format_id": f["format_id"],
+                            "ext": ext
+                        })
+
+                subtitles = info.get("subtitles", {})
+                subtitle_choices = []
+                subtitle_map = {}
+                for lang, tracks in subtitles.items():
+                    for track in tracks:
+                        ext = track.get("ext", "vtt")
+                        name = f"{lang} ({ext})"
+                        subtitle_choices.append(name)
+                        subtitle_map[name] = {"lang": lang, "ext": ext}
+
                 item = {
                     "url": url,
+                    "title_base": title,
                     "title": title,
                     "thumb_url": available_previews[0][1] if available_previews else "",
                     "formats": formats,
@@ -211,6 +250,12 @@ class SakuraDownloader:
                     "format_var": StringVar(value=format_choices[0]),
                     "preview_choices": available_previews,
                     "preview_var": StringVar(value=available_previews[0][0] if available_previews else ""),
+                    "subtitle_choices": subtitle_choices,
+                    "subtitle_map": subtitle_map,
+                    "subtitle_var": StringVar(value=subtitle_choices[0] if subtitle_choices else ""),
+                    "dubbed_audio_tracks": dubbed_audio_tracks,
+                    "dub_choices": [track["label"] for track in dubbed_audio_tracks],
+                    "dub_var": StringVar(value=dubbed_audio_tracks[0]["label"] if dubbed_audio_tracks else ""),
                 }
                 self.download_items.insert(0, item)
                 self.history_manager.add(url, item["thumb_url"])
@@ -250,6 +295,8 @@ class SakuraDownloader:
             rowf = Frame(right, bg="#ffe6f0")
             rowf.pack(anchor="w", pady=2)
             Label(rowf, text="Формат:", bg="#ffe6f0").pack(side="left")
+            # Привязка StringVar и обновление названия
+            fvar = item["format_var"]
             OptionMenu(rowf, item["format_var"], *item["format_choices"]).pack(side="left", padx=4)
             Label(rowf, text="Качество превью:", bg="#ffe6f0").pack(side="left", padx=8)
             OptionMenu(
@@ -259,12 +306,24 @@ class SakuraDownloader:
                 command=lambda res, i=item: self.save_preview_dialog(i, res)
             ).pack(side="left")
             # Субтитры
-            Label(right, text="Субтитры не найдены", bg="#ffe6f0", fg="#888").pack(anchor="w", pady=2)
+            if item["subtitle_choices"]:
+                rowf2 = Frame(right, bg="#ffe6f0")
+                rowf2.pack(anchor="w", pady=2)
+                Label(rowf2, text="Субтитры:", bg="#ffe6f0").pack(side="left")
+                OptionMenu(rowf2, item["subtitle_var"], *item["subtitle_choices"]).pack(side="left", padx=4)
+                Button(rowf2, text="⬇️", command=lambda i=item: self.download_subs(i), bg="#fff0f5").pack(side="left", padx=2)
+            else:
+                Label(right, text="Субтитры не найдены", bg="#ffe6f0", fg="#888").pack(anchor="w", pady=2)
+            # Дубляж
+            if item["dub_choices"]:
+                Label(rowf, text="Дубляж:", bg="#ffe6f0").pack(side="left", padx=8)
+                OptionMenu(rowf, item["dub_var"], *item["dub_choices"]).pack(side="left")
             # Кнопки
             btnf = Frame(right, bg="#ffe6f0")
             btnf.pack(anchor="w", pady=2)
             Button(btnf, text="⬇️ Скачать", command=lambda i=item: self.download_video(i), bg="#fff0f5").pack(side="left", padx=2)
             Button(btnf, text="🗑", command=lambda i=item: self.remove_item(i), bg="#ffe6f0").pack(side="left", padx=2)
+
         # Скрыть preview если ничего не выбрано
         # if self.selected_item is None:
         #     self.preview_frame.grid_remove()
@@ -442,36 +501,223 @@ class SakuraDownloader:
         except Exception as e:
             self.log(f"Ошибка: {e}")
 
+    def merge_video_with_dub(self, orig_path, dub_path, out_path):
+        # Проверяем, есть ли видео-дорожка в оригинале
+        import subprocess
+        import json
+
+        # Получаем информацию о дорожках
+        def has_video(path):
+            cmd = [
+                "ffprobe", "-v", "error", "-select_streams", "v",
+                "-show_entries", "stream=codec_type", "-of", "json", path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            info = json.loads(result.stdout)
+            return bool(info.get("streams"))
+
+        if has_video(orig_path):
+            # Оригинал содержит видео — объединяем видео + дубляж
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", orig_path,
+                "-i", dub_path,
+                "-c:v", "copy",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-shortest",
+                out_path
+            ]
+        else:
+            # Оригинал — только аудио, просто копируем дубляж
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", dub_path,
+                "-c", "copy",
+                out_path
+            ]
+        subprocess.run(cmd, check=True)
+
     def download_video(self, item):
         def worker():
-            # Запросить папку для сохранения
             out_dir = filedialog.askdirectory(title="Выберите папку для видео")
             if not out_dir:
                 return
-            fmt = item["format_var"].get()
-            ydl_opts = {
-                'outtmpl': os.path.join(out_dir, '%(title)s.%(ext)s'),
-                'format': item["format_map"][fmt],
-                'logger': YTDLLogger(self.log),
-                'progress_hooks': [lambda d: ytdl_hook(d, self.log)],
-                'noplaylist': True,
-                'quiet': False,  # Важно!
-                'no_warnings': True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                try:
+
+            # Ищем лучший видеопоток
+            best_video = None
+            best_height = -1
+            for f in item["formats"]:
+                if f.get("vcodec") != "none" and f.get("acodec") == "none":
+                    h = f.get("height") or 0
+                    if h > best_height:
+                        best_height = h
+                        best_video = f
+
+            # Ищем лучший аудиопоток
+            best_audio = None
+            best_abr = -1
+            for f in item["formats"]:
+                if f.get("acodec") != "none" and f.get("vcodec") == "none":
+                    abr = f.get("abr") or 0
+                    if abr > best_abr:
+                        best_abr = abr
+                        best_audio = f
+
+            orig_path = os.path.join(out_dir, f"{item['title_base']}_orig.mp4")
+            out_path = os.path.join(out_dir, f"{item['title_base']}.mp4")
+
+            if best_video and best_audio:
+                video_path = os.path.join(out_dir, f"{item['title_base']}_video.mp4")
+                audio_path = os.path.join(out_dir, f"{item['title_base']}_audio.m4a")
+
+                # Скачиваем видео
+                ydl_opts_video = {
+                    'outtmpl': video_path,
+                    'format': best_video["format_id"],
+                    'quiet': False,
+                    'noplaylist': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
                     ydl.download([item["url"]])
-                    self.log(f"Скачано видео: {item['title']}")
-                except Exception as e:
-                    self.log(f"Ошибка скачивания: {e}")
+
+                # Скачиваем аудио
+                ydl_opts_audio = {
+                    'outtmpl': audio_path,
+                    'format': best_audio["format_id"],
+                    'quiet': False,
+                    'noplaylist': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
+                    ydl.download([item["url"]])
+
+                # Объединяем
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", video_path,
+                    "-i", audio_path,
+                    "-c", "copy",
+                    orig_path
+                ]
+                subprocess.run(cmd, check=True)
+            else:
+                self.log("Не удалось найти подходящие видео и аудио потоки.")
+                return
+
+            # Дальше — объединение с дубляжом, как у вас реализовано
+            if item.get("dubbed_audio_tracks"):
+                # Найти выбранный формат дубляжа
+                selected_dub = item["dub_var"].get()
+                dub = None
+                for track in item["dubbed_audio_tracks"]:
+                    if track["label"] == selected_dub:
+                        dub = track
+                        break
+                if not dub:
+                    dub = item["dubbed_audio_tracks"][0]  # fallback
+
+                dub_path = os.path.join(out_dir, f"{item['title_base']}_dub.{dub['ext']}")
+                ydl_opts_dub = {
+                    'outtmpl': dub_path,
+                    'format': dub["format_id"],
+                    'quiet': False,
+                    'noplaylist': True,
+                    'no_warnings': True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_dub) as ydl:
+                    ydl.download([item["url"]])
+                self.merge_video_with_dub(orig_path, dub_path, out_path)
+                # Удаляем временные файлы
+                for f in [video_path, audio_path, orig_path, dub_path]:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except Exception:
+                        pass
+            else:
+                os.rename(orig_path, out_path)
+
         threading.Thread(target=worker, daemon=True).start()
 
     def download_subs(self, item):
-        self.log(f"Скачивание субтитров: {item['title']}")
+        if not item["subtitle_choices"]:
+            self.log(f"Субтитры не найдены для: {item['title']}")
+            return
+        lang_ext = item["subtitle_var"].get()
+        sub_info = item["subtitle_map"].get(lang_ext)
+        if not sub_info:
+            self.log("Не выбран язык субтитров.")
+            return
+        out_dir = filedialog.askdirectory(title="Выберите папку для субтитров")
+        if not out_dir:
+            return
+        ydl_opts = {
+            'skip_download': True,
+            'writesubtitles': True,
+            'subtitleslangs': [sub_info["lang"]],
+            'subtitlesformat': sub_info["ext"],
+            'outtmpl': os.path.join(out_dir, '%(title)s.%(ext)s'),
+            'quiet': False,
+            'no_warnings': True,
+        }
+        def worker():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    ydl.download([item["url"]])
+                    self.log(f"Скачаны субтитры ({lang_ext}) для: {item['title']}")
+                except Exception as e:
+                    self.log(f"Ошибка скачивания субтитров: {e}")
+        threading.Thread(target=worker, daemon=True).start()
 
-    def save_preview(self, item):
-        self.log(f"Сохранение превью: {item['title']}")
+    def show_format_selector(self, item):
+        win = Toplevel(self.root)
+        win.title("Выберите формат")
+        win.geometry("400x320")  # Ограниченная высота
+        frame = Frame(win)
+        frame.pack(fill="both", expand=True)
+        scrollbar = Scrollbar(frame)
+        scrollbar.pack(side="right", fill="y")
+        listbox = Listbox(frame, selectmode=SINGLE, yscrollcommand=scrollbar.set, height=15)  # Ограничить высоту
+        for fmt in item["format_choices"]:
+            listbox.insert(END, fmt)
+        listbox.pack(fill="both", expand=True)
+        scrollbar.config(command=listbox.yview)
 
+        def on_select(event):
+            idx = listbox.curselection()
+            if idx:
+                fmt = item["format_choices"][idx[0]]
+                if "дубляж" in fmt:
+                    for lang in LANG_NATIVE.values():
+                        if lang in fmt:
+                            item["title"] = f"{item['title_base']} [{lang}]"
+                            break
+                else:
+                    item["title"] = item["title_base"]
+                item["format_var"].set(fmt)
+                win.destroy()
+                self.render_download_items()
+        listbox.bind("<<ListboxSelect>>", on_select)
+
+LANG_NATIVE = {
+    "ru": "Русский",
+    "en": "English",
+    "es": "Español",
+    "fr": "Français",
+    "de": "Deutsch",
+    "ja": "日本語",
+    "ko": "한국어",
+    "hi": "हिन्दी",
+    "pt": "Português",
+    "it": "Italiano",
+    "tr": "Türkçe",
+    "vi": "Tiếng Việt",
+    "zh": "中文",
+    "ar": "العربية",
+    # ...добавьте остальные языки по необходимости...
+}
 
 def build_ui(root):
     SakuraDownloader(root)
