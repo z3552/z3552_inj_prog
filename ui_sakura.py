@@ -15,8 +15,8 @@ import yt_dlp
 import threading
 import subprocess
 
-# ДО класса SakuraDownloader:
-ffmpeg_dir = r"D:\github\z3552_inj_prog\ffmpeg\bin"
+# ffmpeg_dir = r"D:\github\z3552_inj_prog\ffmpeg\bin"
+ffmpeg_dir = os.path.join(os.path.dirname(__file__), "ffmpeg", "bin")
 if ffmpeg_dir not in os.environ.get("PATH", ""):
     os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
@@ -546,17 +546,18 @@ class SakuraDownloader:
                 "-i", orig_path,
                 "-i", dub_path,
                 "-c:v", "copy",
+                "-c:a", "aac",
                 "-map", "0:v:0",
                 "-map", "1:a:0",
                 "-shortest",
-                out_path
+                out_path  
             ]
         else:
             # Оригинал — только аудио, просто копируем дубляж
             cmd = [
                 "ffmpeg", "-y",
                 "-i", dub_path,
-                "-c", "copy",
+                "-c:a", "aac",
                 out_path
             ]
         subprocess.run(cmd, check=True)
@@ -594,14 +595,19 @@ class SakuraDownloader:
             orig_path = os.path.join(out_dir, f"{safe_title}_orig.mp4")
             out_path = os.path.join(out_dir, f"{safe_title}.mp4")
 
+            def log_safe(msg):
+                self.root.after(0, lambda: self.log(msg))
+
             if best_video and best_audio:
                 # Скачиваем видео
                 ydl_opts_video = {
                     'outtmpl': video_path,
                     'format': best_video["format_id"],
-                    'quiet': False,
+                    'quiet': True,
                     'noplaylist': True,
                     'no_warnings': True,
+                    'logger': YTDLLogger(log_safe),
+                    'progress_hooks': [lambda d: ytdl_hook(d, log_safe)],
                 }
                 with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
                     ydl.download([item["url"]])
@@ -610,9 +616,11 @@ class SakuraDownloader:
                 ydl_opts_audio = {
                     'outtmpl': audio_path,
                     'format': best_audio["format_id"],
-                    'quiet': False,
+                    'quiet': True,
                     'noplaylist': True,
                     'no_warnings': True,
+                    'logger': YTDLLogger(log_safe),
+                    'progress_hooks': [lambda d: ytdl_hook(d, log_safe)],
                 }
                 with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
                     ydl.download([item["url"]])
@@ -622,12 +630,13 @@ class SakuraDownloader:
                     "ffmpeg", "-y",
                     "-i", video_path,
                     "-i", audio_path,
-                    "-c", "copy",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
                     orig_path
                 ]
                 subprocess.run(cmd, check=True)
             else:
-                self.log("Не удалось найти подходящие видео и аудио потоки.")
+                log_safe("Не удалось найти подходящие видео и аудио потоки.")
                 return
 
             # Дальше — объединение с дубляжом
@@ -645,9 +654,11 @@ class SakuraDownloader:
                 ydl_opts_dub = {
                     'outtmpl': dub_path,
                     'format': dub["format_id"],
-                    'quiet': False,
+                    'quiet': True,
                     'noplaylist': True,
                     'no_warnings': True,
+                    'logger': YTDLLogger(log_safe),
+                    'progress_hooks': [lambda d: ytdl_hook(d, log_safe)],
                 }
                 with yt_dlp.YoutubeDL(ydl_opts_dub) as ydl:
                     ydl.download([item["url"]])
