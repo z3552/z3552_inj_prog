@@ -78,7 +78,7 @@ class SakuraDownloader:
         self.build_ui()
 
     def build_ui(self):
-        self.root.geometry("1000x700")
+        self.root.geometry("1000x750")
         self.root.resizable(False, False)
         self.root.configure(bg="#ffe6f0")
         self.root.grid_rowconfigure(1, weight=1)
@@ -89,49 +89,69 @@ class SakuraDownloader:
         frame.grid_rowconfigure(2, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
-        # Заголовок
-        Label(frame, text="🌸 Сакура Загрузчик", bg="#fff0f5", fg="#d63384", font=("Helvetica", 18, "bold")).grid(row=0, column=0, columnspan=6, pady=10, sticky="ew")
+        # Заголовок (по центру)
+        Label(
+            frame,
+            text="🌸 Сакура Загрузчик",
+            bg="#fff0f5",
+            fg="#d63384",
+            font=("Helvetica", 18, "bold"),
+            anchor="center",
+            justify="center"
+        ).grid(row=0, column=0, columnspan=6, pady=10, sticky="ew")
 
-        # Ссылка и кнопки
-        Label(frame, text="Ссылка:", bg="#fff0f5").grid(row=1, column=0, sticky="w")
-        Entry(frame, textvariable=self.url, width=60).grid(row=1, column=1, columnspan=3, sticky="ew")
-        Button(frame, text="➕ Добавить", command=self.add_to_list, bg="#ffe6f0").grid(row=1, column=4, sticky="ew")
-        Button(frame, text="История", command=self.show_history, bg="#ffe6f0").grid(row=1, column=5, sticky="ew")
+        # Ссылка и кнопки (компактно и по центру)
+        urlf = Frame(frame, bg="#fff0f5")
+        urlf.grid(row=1, column=0, columnspan=6, pady=(0, 10))
+        Label(urlf, text="Ссылка:", bg="#fff0f5").pack(side="left", padx=(0, 5))
+        entry_url = Entry(urlf, textvariable=self.url, width=50)
+        entry_url.pack(side="left", padx=(0, 5))
+        Button(urlf, text="➕ Добавить", command=self.add_to_list, bg="#ffe6f0", width=12).pack(side="left", padx=(0, 5))
+        Button(urlf, text="История", command=self.show_history, bg="#ffe6f0", width=10).pack(side="left")
 
-        # Список роликов с прокруткой
-        self.vid_canvas = Canvas(frame, bg="#fff0f5", highlightthickness=0)
+        # --- Только это! ---
+        def paste_clipboard(event=None):
+            try:
+                text = entry_url.clipboard_get()
+                entry_url.delete(0, "end")
+                entry_url.insert(0, text)
+                return "break"
+            except Exception:
+                pass
+
+        # Только универсальный биндинг
+        entry_url.bind("<<Paste>>", paste_clipboard)
+
+        # Кнопки групповой загрузки (компактно и по центру)
+        groupf = Frame(frame, bg="#fff0f5")
+        groupf.grid(row=3, column=0, columnspan=6, pady=10)
+        for i in range(5):
+            groupf.grid_columnconfigure(i, weight=1)
+        Button(groupf, text="Скачать все субтитры", command=self.download_all_subs, bg="#ffe6f0", width=18).grid(row=0, column=0, padx=4)
+        Button(groupf, text="Скачать все превью", command=self.download_all_previews, bg="#ffe6f0", width=18).grid(row=0, column=1, padx=4)
+        Button(groupf, text="Скачать все ролики", command=self.download_all_videos, bg="#ffe6f0", width=18).grid(row=0, column=2, padx=4)
+        Button(groupf, text="Скачать всё", command=self.download_everything, bg="#ff99cc", width=14).grid(row=0, column=3, padx=4)
+        Button(groupf, text="Очистить список", command=self.clear_all_items, bg="#ffb3d9", width=16).grid(row=0, column=4, padx=4)
+
+        # Логи на всю ширину
+        Label(frame, text="Лог:", bg="#fff0f5").grid(row=5, column=0, columnspan=6, sticky="w", pady=(15, 0))
+        self.log_output = Text(frame, height=14, wrap="word", bg="#fff0f5", fg="#800040", state="disabled", font=("Consolas", 10))
+        self.log_output.grid(row=6, column=0, columnspan=6, sticky="nsew", padx=2, pady=2)
+        log_scroll = Scrollbar(frame, command=self.log_output.yview)
+        self.log_output.config(yscrollcommand=log_scroll.set)
+        log_scroll.grid(row=6, column=6, sticky="ns")
+
+        # Список роликов (items_frame) с прокруткой
+        self.vid_canvas = Canvas(frame, bg="#fff0f5", highlightthickness=0, height=220)
         self.vid_scrollbar = Scrollbar(frame, orient="vertical", command=self.vid_canvas.yview)
         self.vid_canvas.configure(yscrollcommand=self.vid_scrollbar.set)
-        self.vid_canvas.grid(row=2, column=0, columnspan=6, sticky="nsew")
-        self.vid_scrollbar.grid(row=2, column=6, sticky="ns")
+        self.vid_canvas.grid(row=2, column=0, columnspan=6, sticky="nsew", pady=(10, 0))
+        self.vid_scrollbar.grid(row=2, column=6, sticky="ns", pady=(10, 0))
         self.items_frame = Frame(self.vid_canvas, bg="#fff0f5")
         self.vid_canvas.create_window((0, 0), window=self.items_frame, anchor="nw")
         self.items_frame.bind("<Configure>", lambda e: self.vid_canvas.configure(scrollregion=self.vid_canvas.bbox("all")))
         self.vid_canvas.bind("<Enter>", lambda e: self.vid_canvas.bind_all("<MouseWheel>", self._on_mousewheel_vid))
         self.vid_canvas.bind("<Leave>", lambda e: self.vid_canvas.unbind_all("<MouseWheel>"))
-
-        # Кнопки групповой загрузки
-        groupf = Frame(frame, bg="#fff0f5")
-        groupf.grid(row=3, column=0, columnspan=6, sticky="ew", pady=5)
-        Button(groupf, text="Скачать все субтитры", command=self.download_all_subs, bg="#ffe6f0").pack(side="left", padx=2)
-        Button(groupf, text="Скачать все превью", command=self.download_all_previews, bg="#ffe6f0").pack(side="left", padx=2)
-        Button(groupf, text="Скачать все ролики", command=self.download_all_videos, bg="#ffe6f0").pack(side="left", padx=2)
-        Button(groupf, text="Скачать всё", command=self.download_everything, bg="#ff99cc").pack(side="left", padx=2)
-
-        # Логи с отдельной прокруткой
-        Label(frame, text="Лог:", bg="#fff0f5").grid(row=4, column=0, sticky="w")
-        self.log_canvas = Canvas(frame, bg="#fff0f5", height=120, highlightthickness=0)
-        self.log_scrollbar = Scrollbar(frame, orient="vertical", command=self.log_canvas.yview)
-        self.log_canvas.configure(yscrollcommand=self.log_scrollbar.set)
-        self.log_canvas.grid(row=5, column=0, columnspan=6, sticky="nsew")
-        self.log_scrollbar.grid(row=5, column=6, sticky="ns")
-        self.log_frame = Frame(self.log_canvas, bg="#fff0f5")
-        self.log_canvas.create_window((0, 0), window=self.log_frame, anchor="nw")
-        self.log_frame.bind("<Configure>", lambda e: self.log_canvas.configure(scrollregion=self.log_canvas.bbox("all")))
-        self.log_canvas.bind("<Enter>", lambda e: self.log_canvas.bind_all("<MouseWheel>", self._on_mousewheel_log))
-        self.log_canvas.bind("<Leave>", lambda e: self.log_canvas.unbind_all("<MouseWheel>"))
-        self.log_output = Text(self.log_frame, height=7, wrap="word", bg="#fff0f5", fg="#800040", state="disabled")
-        self.log_output.pack(fill="both", expand=True)
 
         self.render_download_items()
 
@@ -140,7 +160,11 @@ class SakuraDownloader:
 
     def _on_mousewheel_log(self, event):
         self.log_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
+        
+    def clear_all_items(self):
+        self.download_items.clear()
+        self.render_download_items()
+        self.log("Список роликов очищен.")
     def add_to_list(self):
         url = self.url.get().strip()
         if not url or url in [item["url"] for item in self.download_items]:
@@ -324,10 +348,6 @@ class SakuraDownloader:
             Button(btnf, text="⬇️ Скачать", command=lambda i=item: self.download_video(i), bg="#fff0f5").pack(side="left", padx=2)
             Button(btnf, text="🗑", command=lambda i=item: self.remove_item(i), bg="#ffe6f0").pack(side="left", padx=2)
 
-        # Скрыть preview если ничего не выбрано
-        # if self.selected_item is None:
-        #     self.preview_frame.grid_remove()
-
     def remove_item(self, item):
         self.download_items.remove(item)
         self.selected_item = None
@@ -392,7 +412,8 @@ class SakuraDownloader:
                 try:
                     response = requests.get(url)
                     if response.status_code == 200:
-                        filename = f"{item['title']}_{res}.jpg".replace("/", "_").replace("\\", "_")
+                        filename = f"{item['title']}_{res}.jpg"
+                        filename = sanitize_filename(filename)  # <--- добавлено
                         path = os.path.join(folder, filename)
                         with open(path, "wb") as f:
                             f.write(response.content)
@@ -409,8 +430,10 @@ class SakuraDownloader:
             return
         for item in self.download_items:
             fmt = item["format_var"].get()
+            # Очистка имени файла
+            safe_title = sanitize_filename(item["title"])
             ydl_opts = {
-                'outtmpl': os.path.join(out_dir, '%(title)s.%(ext)s'),
+                'outtmpl': os.path.join(out_dir, f'{safe_title}.%(ext)s'),
                 'format': item["format_map"][fmt],
                 'quiet': False,
                 'noplaylist': True,
@@ -491,7 +514,7 @@ class SakuraDownloader:
         try:
             response = requests.get(url)
             if response.status_code == 200:
-                filename = f"{item['title']}_{resolution}.jpg".replace("/", "_").replace("\\", "_")
+                filename = sanitize_filename(f"{item['title']}_{resolution}.jpg")
                 path = os.path.join(folder, filename)
                 with open(path, "wb") as f:
                     f.write(response.content)
@@ -544,6 +567,8 @@ class SakuraDownloader:
             if not out_dir:
                 return
 
+            safe_title = sanitize_filename(item['title_base'])
+
             # Ищем лучший видеопоток
             best_video = None
             best_height = -1
@@ -564,13 +589,12 @@ class SakuraDownloader:
                         best_abr = abr
                         best_audio = f
 
-            orig_path = os.path.join(out_dir, f"{item['title_base']}_orig.mp4")
-            out_path = os.path.join(out_dir, f"{item['title_base']}.mp4")
+            video_path = os.path.join(out_dir, f"{safe_title}_video.mp4")
+            audio_path = os.path.join(out_dir, f"{safe_title}_audio.m4a")
+            orig_path = os.path.join(out_dir, f"{safe_title}_orig.mp4")
+            out_path = os.path.join(out_dir, f"{safe_title}.mp4")
 
             if best_video and best_audio:
-                video_path = os.path.join(out_dir, f"{item['title_base']}_video.mp4")
-                audio_path = os.path.join(out_dir, f"{item['title_base']}_audio.m4a")
-
                 # Скачиваем видео
                 ydl_opts_video = {
                     'outtmpl': video_path,
@@ -606,9 +630,8 @@ class SakuraDownloader:
                 self.log("Не удалось найти подходящие видео и аудио потоки.")
                 return
 
-            # Дальше — объединение с дубляжом, как у вас реализовано
+            # Дальше — объединение с дубляжом
             if item.get("dubbed_audio_tracks"):
-                # Найти выбранный формат дубляжа
                 selected_dub = item["dub_var"].get()
                 dub = None
                 for track in item["dubbed_audio_tracks"]:
@@ -618,7 +641,7 @@ class SakuraDownloader:
                 if not dub:
                     dub = item["dubbed_audio_tracks"][0]  # fallback
 
-                dub_path = os.path.join(out_dir, f"{item['title_base']}_dub.{dub['ext']}")
+                dub_path = os.path.join(out_dir, f"{safe_title}_dub.{dub['ext']}")
                 ydl_opts_dub = {
                     'outtmpl': dub_path,
                     'format': dub["format_id"],
@@ -638,6 +661,12 @@ class SakuraDownloader:
                         pass
             else:
                 os.rename(orig_path, out_path)
+                for f in [video_path, audio_path, orig_path]:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except Exception:
+                        pass
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -653,12 +682,13 @@ class SakuraDownloader:
         out_dir = filedialog.askdirectory(title="Выберите папку для субтитров")
         if not out_dir:
             return
+        safe_title = sanitize_filename(item["title"])
         ydl_opts = {
             'skip_download': True,
             'writesubtitles': True,
             'subtitleslangs': [sub_info["lang"]],
             'subtitlesformat': sub_info["ext"],
-            'outtmpl': os.path.join(out_dir, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(out_dir, f'{safe_title}.%(ext)s'),
             'quiet': False,
             'no_warnings': True,
         }
@@ -670,36 +700,6 @@ class SakuraDownloader:
                 except Exception as e:
                     self.log(f"Ошибка скачивания субтитров: {e}")
         threading.Thread(target=worker, daemon=True).start()
-
-    def show_format_selector(self, item):
-        win = Toplevel(self.root)
-        win.title("Выберите формат")
-        win.geometry("400x320")  # Ограниченная высота
-        frame = Frame(win)
-        frame.pack(fill="both", expand=True)
-        scrollbar = Scrollbar(frame)
-        scrollbar.pack(side="right", fill="y")
-        listbox = Listbox(frame, selectmode=SINGLE, yscrollcommand=scrollbar.set, height=15)  # Ограничить высоту
-        for fmt in item["format_choices"]:
-            listbox.insert(END, fmt)
-        listbox.pack(fill="both", expand=True)
-        scrollbar.config(command=listbox.yview)
-
-        def on_select(event):
-            idx = listbox.curselection()
-            if idx:
-                fmt = item["format_choices"][idx[0]]
-                if "дубляж" in fmt:
-                    for lang in LANG_NATIVE.values():
-                        if lang in fmt:
-                            item["title"] = f"{item['title_base']} [{lang}]"
-                            break
-                else:
-                    item["title"] = item["title_base"]
-                item["format_var"].set(fmt)
-                win.destroy()
-                self.render_download_items()
-        listbox.bind("<<ListboxSelect>>", on_select)
 
 LANG_NATIVE = {
     "ru": "Русский",
@@ -716,8 +716,12 @@ LANG_NATIVE = {
     "vi": "Tiếng Việt",
     "zh": "中文",
     "ar": "العربية",
-    # ...добавьте остальные языки по необходимости...
+    #остальные языки по необходимости...
 }
 
 def build_ui(root):
     SakuraDownloader(root)
+
+def sanitize_filename(filename):
+    import re
+    return re.sub(r'[<>:"/\\|?*]', '_', filename)
